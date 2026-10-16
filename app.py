@@ -40,35 +40,39 @@ excel_path = "Base de datos pereira Agosto 15 de 2026.xlsx"
 
 # Área principal
 if uploaded_pdf is not None:
-    # Guardar temporalmente el PDF subido
-    with open("temp_plano.pdf", "wb") as f:
-        f.write(uploaded_pdf.getbuffer())
-    
     col1, col2 = st.columns([1, 1])
     
     with col1:
         st.subheader("📄 Plano Cargado")
         try:
-            doc = fitz.open("temp_plano.pdf")
+            # Procesamiento en memoria RAM (Sin guardar archivos en disco)
+            pdf_bytes = uploaded_pdf.read()
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             pagina = doc[0]
             pix = pagina.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            ruta_img = "temp_preview.png"
-            pix.save(ruta_img)
-            st.image(ruta_img, caption="Vista previa del plano arquitectónico", use_container_width=True)
+            
+            # Convertir imagen para visualización y OpenCV
+            img_bytes = pix.tobytes("png")
+            st.image(img_bytes, caption="Vista previa del plano arquitectónico", use_container_width=True)
+            
+            # Convertir a formato OpenCV
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         except Exception as e:
             st.error(f"No se pudo renderizar la vista previa del PDF: {e}")
+            img = None
 
     with col2:
         st.subheader("⚙️ Análisis de Espacios (IA)")
         with st.spinner("Extrayendo dimensiones y metrajes del plano..."):
             try:
-                img = cv2.imread(ruta_img)
-                gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                _, binarizada = cv2.threshold(gris, 200, 255, cv2.THRESH_BINARY_INV)
-                binarizada = cv2.dilate(binarizada, np.ones((3, 3), np.uint8), iterations=2)
-                
-                contornos, _ = cv2.findContours(binarizada, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                contornos_validos = [cnt for cnt in contornos if cv2.contourArea(cnt) > (100 * 100)]
+                if img is not None:
+                    gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    _, binarizada = cv2.threshold(gris, 200, 255, cv2.THRESH_BINARY_INV)
+                    binarizada = cv2.dilate(binarizada, np.ones((3, 3), np.uint8), iterations=2)
+                    
+                    contornos, _ = cv2.findContours(binarizada, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    contornos_validos = [cnt for cnt in contornos if cv2.contourArea(cnt) > (100 * 100)]
                 
                 area_objetivo = 54.0  # Metraje base calibrado del proyecto
                 st.success(f"¡Análisis completado con éxito!")
@@ -141,7 +145,6 @@ if uploaded_pdf is not None:
                     col_m5.metric("IVA / Utilidad (19%)", f"${iva_util:,.2f}")
                     col_m6.metric("VALOR TOTAL", f"${gran_total:,.2f}", delta="Cotización Lista")
                     
-                    # Función para convertir dataframe a Excel para descarga en memoria
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
                         df_resumen.to_excel(writer, index=False, sheet_name='Presupuesto')

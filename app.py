@@ -44,7 +44,9 @@ st.sidebar.header("📁 Panel de Control B2B")
 uploaded_pdf = st.sidebar.file_uploader(
     "Sube tu plano arquitectónico (PDF)", 
     type=["pdf"], 
-    key="pdf_uploader_main"
+    accept_multiple_files=False,
+    key="pdf_uploader_main",
+    help="Sube tu plano en formato PDF (Máx. 200MB)"
 )
 
 st.sidebar.markdown("---")

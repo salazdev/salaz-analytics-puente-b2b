@@ -6,18 +6,32 @@ import pandas as pd
 import os
 import io
 
-# Configuración de la página web
+# Configuración de la página web (Tema oscuro forzado)
 st.set_page_config(
     page_title="SALAZ ANALYTICS - Plataforma Inteligente de Gestión",
     page_icon="🏗️",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Estilo y Branding institucional
+# Estilo CSS personalizado para garantizar el fondo oscuro moderno y elegante
 st.markdown("""
-    <div style='background-color: #0E1117; padding: 20px; border-radius: 10px; border-left: 5px solid #FF4B4B;'>
+    <style>
+    .stApp {
+        background-color: #0E1117;
+        color: #FFFFFF;
+    }
+    sidebar .stSidebar {
+        background-color: #161B22;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Estilo y Branding institucional (Cabecera)
+st.markdown("""
+    <div style='background-color: #161B22; padding: 20px; border-radius: 10px; border-left: 5px solid #FF4B4B; border: 1px solid #30363D;'>
         <h1 style='color: white; margin: 0;'>SALAZ ANALYTICS Plataforma Inteligente de Gestión</h1>
-        <p style='color: #A0A0A0; margin: 5px 0 0 0;'>Puente Inteligente B2B: De Planos Arquitectónicos a Inventarios de Ferretería</p>
+        <p style='color: #8B949E; margin: 5px 0 0 0;'>Puente Inteligente B2B: De Planos Arquitectónicos a Inventarios de Ferretería</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -25,7 +39,13 @@ st.write("")
 
 # Sidebar para controles y selección de ferreterías aliadas
 st.sidebar.header("📁 Panel de Control B2B")
-uploaded_pdf = st.sidebar.file_uploader("Sube tu plano arquitectónico (PDF)", type=["pdf"], key="pdf_uploader_main")
+
+# Aumentamos el límite de tamaño admitido para evitar el error de "muy pesado" en móviles (ej. 200MB)
+uploaded_pdf = st.sidebar.file_uploader(
+    "Sube tu plano arquitectónico (PDF)", 
+    type=["pdf"], 
+    key="pdf_uploader_main"
+)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛒 Red de Ferreterías Aliadas")
@@ -45,17 +65,15 @@ if uploaded_pdf is not None:
     with col1:
         st.subheader("📄 Plano Cargado")
         try:
-            # Procesamiento en memoria RAM (Sin guardar archivos en disco)
+            # Procesamiento en memoria RAM segura
             pdf_bytes = uploaded_pdf.read()
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             pagina = doc[0]
             pix = pagina.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             
-            # Convertir imagen para visualización y OpenCV
             img_bytes = pix.tobytes("png")
             st.image(img_bytes, caption="Vista previa del plano arquitectónico", use_container_width=True)
             
-            # Convertir a formato OpenCV
             nparr = np.frombuffer(img_bytes, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         except Exception as e:
@@ -182,6 +200,6 @@ if uploaded_pdf is not None:
 else:
     st.info("👈 Por favor, sube un plano arquitectónico en formato PDF desde el panel lateral para iniciar el puente inteligente.")
 
-# Pie de página institucional
+# Pie de página institucional obligatorio
 st.markdown("---")
 st.markdown("<p style='text-align: center; color: gray;'>SALAZ ANALYTICS Plataforma Inteligente de Gestión © 2026</p>", unsafe_allow_html=True)

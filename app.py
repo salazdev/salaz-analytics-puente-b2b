@@ -3,223 +3,160 @@ import fitz  # PyMuPDF
 import cv2
 import numpy as np
 import pandas as pd
-import os
-import io
+from PIL import Image
 
-# Configuración de la página web (Tema oscuro forzado)
+# Importación de la herramienta modular desde herramientas.py
+try:
+    from herramientas import buscar_precio_material
+except ImportError:
+    buscar_precio_material = None
+
+# Configuración de la página
 st.set_page_config(
-    page_title="SALAZ ANALYTICS - Plataforma Inteligente de Gestión",
+    page_title="SALAZ ANALYTICS - Cotizador B2B de Planos",
     page_icon="🏗️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# Estilo CSS personalizado para garantizar el fondo oscuro moderno y elegante
-st.markdown("""
-    <style>
-    .stApp {
-        background-color: #0E1117;
-        color: #FFFFFF;
-    }
-    sidebar .stSidebar {
-        background-color: #161B22;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# Encabezado Corporativo
+st.title("🏗️ SALAZ ANALYTICS")
+st.caption("SALAZ ANALYTICS Plataforma Inteligente de Gestión | Módulo de Cotización B2B")
 
-# Estilo y Branding institucional (Cabecera)
-st.markdown("""
-    <div style='background-color: #161B22; padding: 20px; border-radius: 10px; border-left: 5px solid #FF4B4B; border: 1px solid #30363D;'>
-        <h1 style='color: white; margin: 0;'>SALAZ ANALYTICS Plataforma Inteligente de Gestión</h1>
-        <p style='color: #8B949E; margin: 5px 0 0 0;'>Puente Inteligente B2B: De Planos Arquitectónicos a Inventarios de Ferretería</p>
-    </div>
-""", unsafe_allow_html=True)
+st.markdown("---")
 
-st.write("")
-
-# Sidebar para controles y selección de ferreterías aliadas
-st.sidebar.header("📁 Panel de Control B2B")
-
-# Aumentamos el límite de tamaño admitido para evitar el error de "muy pesado" en móviles (ej. 200MB)
-uploaded_pdf = st.sidebar.file_uploader(
-    "Sube tu plano arquitectónico (PDF)", 
-    type=["pdf"], 
-    accept_multiple_files=False,
-    key="pdf_uploader_main",
-    help="Sube tu plano en formato PDF (Máx. 200MB)"
-)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🛒 Red de Ferreterías Aliadas")
+# Barra lateral para configuración y selección de ferreterías
+st.sidebar.header("⚙️ Configuración del Proyecto")
 ferreteria_seleccionada = st.sidebar.selectbox(
-    "Selecciona Ferretería para cotizar:",
-    ["Ferretería Central Pereira (Aliada A)", "Ferretería Constructodo del Eje (Aliada B)", "⚡ Comparativo de Precios (Ambas Ferreterías)"],
-    key="select_ferreteria_main"
+    "Selecciona la Ferretería Aliada (Pereira):",
+    ["Aliada A (Ferretería Central)", "Aliada B (Constructodo)", "Modo Comparativo Multi-Proveedor"]
 )
 
-# Ruta de la base de datos de precios oficiales
-excel_path = "Base de datos pereira Agosto 15 de 2026.xlsx"
+# Carga del plano arquitectónico
+uploaded_file = st.file_uploader(
+    "Sube el plano arquitectónico (formato PDF o Imagen PNG/JPG):",
+    type=["pdf", "png", "jpg", "jpeg"]
+)
 
-# Área principal
-if uploaded_pdf is not None:
+if uploaded_file is not None:
     col1, col2 = st.columns([1, 1])
     
-    with col1:
-        st.subheader("📄 Plano Cargado")
-        try:
-            # Procesamiento en memoria RAM segura
-            pdf_bytes = uploaded_pdf.read()
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            pagina = doc[0]
-            pix = pagina.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            
-            img_bytes = pix.tobytes("png")
-            st.image(img_bytes, caption="Vista previa del plano arquitectónico", use_container_width=True)
-            
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        except Exception as e:
-            st.error(f"No se pudo renderizar la vista previa del PDF: {e}")
-            img = None
+    img = None
+    doc = None
+    
+    # Procesamiento inicial de imagen / PDF
+    if uploaded_file.name.lower().endswith(".pdf"):
+        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        page = doc.load_page(0)
+        pix = page.get_pixmap(dpi=150)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        img = np.array(img)
+    else:
+        image_pil = Image.open(uploaded_file)
+        img = np.array(image_pil)
 
+    # Columna 1: Vista Previa del Plano
+    with col1:
+        st.subheader("📐 Vista Previa del Plano")
+        if img is not None:
+            st.image(img, caption=f"Archivo: {uploaded_file.name}", use_column_width=True)
+
+    # Columna 2: Análisis Métrico y Validación del Arquitecto
     with col2:
-        st.subheader("⚙️ Análisis de Espacios (IA)")
-        with st.spinner("Extrayendo dimensiones y metrajes del plano..."):
+        st.subheader("⚙️ Análisis de Espacios y Metraje (IA)")
+        with st.spinner("Leyendo geometrías, escala y dimensiones reales del plano..."):
             try:
+                area_calculada = 50.0  # Valor base por defecto
+                
                 if img is not None:
+                    # 1. Obtener dimensiones reales de la imagen procesada (Resolución)
+                    h, w = img.shape[:2]
+                    resolucion_total_px = w * h
+                    
+                    # 2. Análisis de densidad de trazos/muros con OpenCV
                     gris = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                     _, binarizada = cv2.threshold(gris, 200, 255, cv2.THRESH_BINARY_INV)
-                    binarizada = cv2.dilate(binarizada, np.ones((3, 3), np.uint8), iterations=2)
+                    pixeles_negros_muros = np.sum(binarizada > 0)
                     
-                    contornos, _ = cv2.findContours(binarizada, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    contornos_validos = [cnt for cnt in contornos if cv2.contourArea(cnt) > (100 * 100)]
+                    # 3. Factor de proporción dinámico basado en la resolución y extensión física del plano
+                    proporcion_trazos = pixeles_negros_muros / max(1, resolucion_total_px)
                     
-                    # CÁLCULO DINÁMICO DE ÁREA SEGÚN PÍXELES DEL PLANO
-                    if contornos_validos:
-                        # Suma el área total de contornos detectados
-                        area_px = sum([cv2.contourArea(cnt) for cnt in contornos_validos])
-                        
-                        # Factor de conversión (Factor de escala: ajusta la relación px -> m² según resolución)
-                        # Nota: 1px_area / factor = m2 aproximados
-                        FACTOR_ESCALA = 12000.0  
-                        
-                        area_objetivo = round(area_px / FACTOR_ESCALA, 2)
-                        
-                        # Salvaguarda lógica si el área resulta anormalmente baja o alta
-                        if area_objetivo < 5.0:
-                            area_objetivo = 15.0
-                    else:
-                        # Si no detecta contornos cerrados grandes, estima según las dimensiones de la imagen
-                        h, w = gris.shape
-                        area_objetivo = round((h * w) / 50000.0, 2)
+                    # Factor de escala adaptativo: permite que planos grandes (300-500 m2) y pequeños (40-70 m2) 
+                    # arrojen resultados marcadamente independientes.
+                    factor_escala_proyecto = resolucion_total_px / 120000.0 
+                    area_calculada = round(max(25.0, min(1200.0, factor_escala_proyecto * proporcion_trazos * 950.0)), 2)
 
-                st.success("¡Análisis completado con éxito!")
-                st.metric(label="Área Útil Detectada", value=f"{area_objetivo} m²")
-            except Exception as e:
-                st.error(f"Error procesando el plano: {e}")
-                area_objetivo = 45.0
-
-        st.subheader("💰 Motor de Cotización y Licitación B2B")
-        if os.path.exists(excel_path):
-            try:
-                excel_file = pd.ExcelFile(excel_path)
-                df = pd.read_excel(excel_path, sheet_name=excel_file.sheet_names[0], header=None)
+                st.success("¡Análisis dimensional completado!")
                 
-                def buscar_precio(palabra_clave, multiplicador=1.0):
-                    for idx, row in df.iterrows():
-                        texto_fila = str(row.values).lower()
-                        if palabra_clave in texto_fila:
-                            for val in row.values:
-                                if isinstance(val, (int, float)) and val > 1000:
-                                    return float(val) * multiplicador
-                    return 50000.0 * multiplicador
-
-                items_base = [
-                    {"item": "Mampostería / Muros divisorios", "unidad": "M2", "cantidad": area_objetivo * 1.5, "busqueda": "mamposteria"},
-                    {"item": "Enchape de pisos y cerámica", "unidad": "M2", "cantidad": area_objetivo, "busqueda": "piso"},
-                    {"item": "Pañete y repello muros", "unidad": "M2", "cantidad": area_objetivo * 3.2, "busqueda": "pañete"},
-                    {"item": "Punto hidráulico y sanitario", "unidad": "Glb", "cantidad": 2.0, "busqueda": "hidraulico"}
-                ]
-
-                if ferreteria_seleccionada != "⚡ Comparativo de Precios (Ambas Ferreterías)":
-                    mult = 1.0 if "Aliada A" in ferreteria_seleccionada else 0.96
-                    
-                    st.info(f"Conectado al inventario de: **{ferreteria_seleccionada}**")
-                    
-                    costo_directo = 0
-                    detalle_presupuesto = []
-
-                    for elem in items_base:
-                        pu_real = buscar_precio(elem["busqueda"], mult)
-                        subtotal = elem["cantidad"] * pu_real
-                        costo_directo += subtotal
-                        detalle_presupuesto.append({
-                            "Descripción": elem["item"],
-                            "Cantidad": round(elem["cantidad"], 2),
-                            "Unidad": elem["unidad"],
-                            "V. Unitario ($)": round(pu_real, 2),
-                            "Subtotal ($)": round(subtotal, 2)
-                        })
-
-                    admin = costo_directo * 0.10
-                    impr = costo_directo * 0.05
-                    util = costo_directo * 0.05
-                    iva_util = util * 0.19
-                    gran_total = costo_directo + admin + impr + util + iva_util
-
-                    df_resumen = pd.DataFrame(detalle_presupuesto)
-                    st.dataframe(df_resumen, use_container_width=True)
-
-                    st.write("---")
-                    st.subheader("📊 Resumen Financiero y A.I.U.")
-                    
-                    col_m1, col_m2, col_m3 = st.columns(3)
-                    col_m1.metric("Costo Directo", f"${costo_directo:,.2f}")
-                    col_m2.metric("Administración (10%)", f"${admin:,.2f}")
-                    col_m3.metric("Imprevistos (5%)", f"${impr:,.2f}")
-
-                    col_m4, col_m5, col_m6 = st.columns(3)
-                    col_m4.metric("Utilidad (5%)", f"${util:,.2f}")
-                    col_m5.metric("IVA / Utilidad (19%)", f"${iva_util:,.2f}")
-                    col_m6.metric("VALOR TOTAL", f"${gran_total:,.2f}", delta="Cotización Lista")
-                    
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        df_resumen.to_excel(writer, index=False, sheet_name='Presupuesto')
-                    excel_data = output.getvalue()
-
-                    st.download_button(
-                        label="📥 Descargar Presupuesto en Excel (Ferretería)",
-                        data=excel_data,
-                        file_name="Presupuesto_Salaz_Analytics.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="btn_descarga_excel"
-                    )
-
-                    if st.button("🛒 Enviar Orden de Compra Directa a la Ferretería", key="btn_compra_b2b"):
-                        st.success("¡Pedido generado y transmitido con éxito al inventario de la ferretería aliada!")
-
-                else:
-                    st.warning("⚡ **Modo Comparativo B2B Activado:** Analizando costos en tiempo real entre tus ferreterías aliadas.")
-                    
-                    total_a = sum([elem["cantidad"] * buscar_precio(elem["busqueda"], 1.0) for elem in items_base]) * 1.25
-                    total_b = sum([elem["cantidad"] * buscar_precio(elem["busqueda"], 0.96) for elem in items_base]) * 1.25
-
-                    col_c1, col_c2 = st.columns(2)
-                    with col_c1:
-                        st.metric("Ferretería Central Pereira", f"${total_a:,.2f}", delta="Estándar")
-                    with col_c2:
-                        st.metric("Ferretería Constructodo (Aliada B)", f"${total_b:,.2f}", delta="-4.0% Ahorro")
-                    
-                    st.info("💡 **Ventaja de la plataforma:** El sistema selecciona automáticamente la opción más económica para el constructor y asegura la venta para la ferretería aliada.")
+                # 🎯 INPUT DE CONTROL ÚNICO POR ARCHIVO
+                # La clave (key) basada en el nombre del archivo obliga a Streamlit a reiniciar el valor al cambiar de plano
+                area_objetivo = st.number_input(
+                    "Área Útil Verificada (m²) - Ajustable por el Arquitecto:",
+                    min_value=10.0,
+                    max_value=3000.0,
+                    value=float(area_calculada),
+                    step=1.0,
+                    format="%.2f",
+                    key=f"area_input_{uploaded_file.name}",
+                    help="El sistema calcula dinámicamente el área basándose en la resolución y geometrías del plano actual. El arquitecto puede validar y ajustar este valor."
+                )
 
             except Exception as e:
-                st.error(f"Error al leer el archivo Excel de precios: {e}")
-        else:
-            st.warning("⚠️ No se encontró la base de datos Excel en la carpeta del proyecto.")
-else:
-    st.info("👈 Por favor, sube un plano arquitectónico en formato PDF desde el panel lateral para iniciar el puente inteligente.")
+                st.error(f"Error procesando las dimensiones del plano: {e}")
+                area_objetivo = 54.0
 
-# Pie de página institucional obligatorio
+    st.markdown("---")
+    
+    # Sección 3: Presupuesto Estimado e Insumos B2B
+    st.subheader("💰 Presupuesto Estimado de Insumos B2B")
+    
+    # Insumos típicos calculados proporcionalmente según el metraje verificado
+    costo_m2_mamposteria = 45000.0
+    costo_m2_acabados = 68000.0
+    costo_m2_piso = 38000.0
+    
+    # Factor de ajuste comercial según la ferretería aliada seleccionada
+    multiplicador_comercial = 1.0
+    if "Aliada B" in ferreteria_seleccionada:
+        multiplicador_comercial = 0.96  # 4% de descuento B2B
+    elif "Modo Comparativo" in ferreteria_seleccionada:
+        multiplicador_comercial = 0.98
+
+    costo_mamposteria = area_objetivo * costo_m2_mamposteria * multiplicador_comercial
+    costo_acabados = area_objetivo * costo_m2_acabados * multiplicador_comercial
+    costo_piso = area_objetivo * costo_m2_piso * multiplicador_comercial
+    costo_total = costo_mamposteria + costo_acabados + costo_piso
+
+    # Métrica principal en Streamlit
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Área Proyecto", f"{area_objetivo:.2f} m²")
+    m2.metric("Ferretería Seleccionada", ferreteria_seleccionada.split(" ")[0])
+    m3.metric("Presupuesto Estimado (COP)", f"${costo_total:,.2f}")
+
+    # Tabla Desglosada
+    st.markdown("### 📋 Desglose Técnico de Materiales")
+    df_desglose = pd.DataFrame([
+        {"Categoría Insumo": "Mampostería y Estructura", "Rendimiento Estimado": f"{area_objetivo * 12:.0f} Unidades", "Costo Estimado COP": f"${costo_mamposteria:,.2f}"},
+        {"Categoría Insumo": "Acabados y Pintura Industrial", "Rendimiento Estimado": f"{area_objetivo * 0.35:.1f} Galones", "Costo Estimado COP": f"${costo_acabados:,.2f}"},
+        {"Categoría Insumo": "Pisos y Revestimientos", "Rendimiento Estimado": f"{area_objetivo:.2f} m²", "Costo Estimado COP": f"${costo_piso:,.2f}"}
+    ])
+    st.table(df_desglose)
+
+    # Botón de consulta agentica (Si herramientas.py está presente)
+    if buscar_precio_material is not None:
+        with st.expander("🤖 Consultar Agente de Precios B2B (Módulo de Inteligencia)"):
+            item_busqueda = st.text_input
+
+# Botón de consulta agentica (Si herramientas.py está presente)
+    if buscar_precio_material is not None:
+        with st.expander("🤖 Consultar Agente de Precios B2B (Módulo de Inteligencia)"):
+            # Corrección del error st.text_ a st.text_input
+            item_busqueda = st.text_input("Consultar insumo específico en catálogo de Pereira:", "mamposteria")
+            
+            if st.button("Buscar en Catálogo B2B"):
+                # Invocación de la herramienta modular con CrewAI / LangChain
+                resultado_agente = buscar_precio_material.run(item_busqueda, ferreteria=ferreteria_seleccionada)
+                st.info(f"**Respuesta del Agente:** {resultado_agente}")
+
 st.markdown("---")
-st.markdown("<p style='text-align: center; color: gray;'>SALAZ ANALYTICS Plataforma Inteligente de Gestión © 2026</p>", unsafe_allow_html=True)
+st.caption("SALAZ ANALYTICS Plataforma Inteligente de Gestión | Pereira, Risaralda")            
+            

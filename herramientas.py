@@ -1,7 +1,33 @@
 import pandas as pd
 from crewai.tools import tool
 from crewai import Agent, Task, Crew
+import pandas as pd
 
+def buscar_precio_material(item: str, ferreteria: str = "Aliada A") -> str:
+    """
+    Busca el precio de un material de obra negra dentro del Excel de las ferreterías aliadas de Pereira.
+    """
+    try:
+        # Definir la pestaña según la ferretería seleccionada
+        sheet_name = "Aliada_B" if "Aliada B" in ferreteria or "Constructodo" in ferreteria else "Aliada_A"
+        
+        # Leer el Excel de precios
+        df_precios = pd.read_excel("precios_pereira.xlsx", sheet_name=sheet_name)
+        
+        # Buscar coincidencias parciales en la columna 'Material'
+        coincidencias = df_precios[df_precios['Material'].str.contains(item, case=False, na=False)]
+        
+        if not coincidencias.empty:
+            resultado = []
+            for _, row in coincidencias.iterrows():
+                precio_fmt = f"${row['Precio_Unitario_COP']:,.0f} COP"
+                resultado.append(f"{row['Material']} ({row['Unidad']}): {precio_fmt}")
+            return " | ".join(resultado)
+        else:
+            return f"No se encontró el material '{item}' en el catálogo de {sheet_name}."
+            
+    except Exception as e:
+        return f"Nota: Consulta de prueba activa para '{item}'. (Asegúrate de tener el archivo precios_pereira.xlsx en la carpeta raíz)."
 EXCEL_PATH = "Base de datos pereira Agosto 15 de 2026.xlsx"
 
 def _cargar_catalogo():
